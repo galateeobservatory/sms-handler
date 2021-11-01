@@ -11,3 +11,4 @@ reqwest = {version = "*", features = ["blocking", "cookies"]}
 error-chain = "*"
 regex = "*"
 quick-xml = "*"
+chrono = "*"

@@ -1,8 +1,8 @@
 use std::io::Read;
-
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use regex::Regex;
+use chrono::{NaiveDate, NaiveDateTime};
 
 pub struct E3372 {
     _base_url: String,
@@ -73,19 +73,23 @@ impl E3372 {
         reader.trim_text(true);
         let mut txt: String = String::new();
         let mut buf = Vec::new();
-        let mut sms: SMS = SMS { _phone: "".to_string(), _message: "".to_string() };
+        let mut sms: SMS = SMS { phone: "".to_string(), message: "".to_string(), date: NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0) };
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::End(ref e)) => {
                     match e.name() {
                         b"Phone" => {
-                            sms._phone = txt.clone();
+                            sms.phone = txt.clone();
                             txt.clear();
                         },
                         b"Content" => {
-                            sms._message = txt.clone();
+                            sms.message = txt.clone();
                             txt.clear();
                         },
+                        b"Date" => {
+                            sms.date = NaiveDateTime::parse_from_str(&txt, "%Y-%m-%d %H:%M:%S").unwrap();
+                            txt.clear();
+                        }
                         b"Message" =>
                             match outbox {
                                 true => self._sent_sms.push(sms.clone()),
@@ -107,20 +111,23 @@ impl E3372 {
 }
 
 pub struct SMS {
-    pub(crate) _phone: String,
-    pub(crate) _message: String
+    pub(crate) phone: String,
+    pub(crate) message: String,
+    pub(crate) date: NaiveDateTime
 }
 
 impl Clone for SMS {
     fn clone(&self) -> Self {
         Self {
-            _phone: self._phone.clone(),
-            _message: self._message.clone()
+            phone: self.phone.clone(),
+            message: self.message.clone(),
+            date: self.date.clone()
         }
     }
 
     fn clone_from(&mut self, source: &Self) {
-        self._phone = source._phone.clone();
-        self._message = source._message.clone();
+        self.phone = source.phone.clone();
+        self.message = source.message.clone();
+        self.date = source.date.clone();
     }
 }
