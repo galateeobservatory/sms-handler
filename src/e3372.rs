@@ -8,7 +8,7 @@ pub struct E3372 {
     _base_url: String,
     _client: reqwest::blocking::Client,
     pub _sent_sms: Vec<SMS>,
-    _receiveid_sms: Vec<SMS>
+    pub _receiveid_sms: Vec<SMS>
 }
 
 impl E3372 {
@@ -78,8 +78,14 @@ impl E3372 {
             match reader.read_event(&mut buf) {
                 Ok(Event::End(ref e)) => {
                     match e.name() {
-                        b"Phone" => sms._phone = txt.clone(),
-                        b"Content" => sms._message = txt.clone(),
+                        b"Phone" => {
+                            sms._phone = txt.clone();
+                            txt.clear();
+                        },
+                        b"Content" => {
+                            sms._message = txt.clone();
+                            txt.clear();
+                        },
                         b"Message" =>
                             match outbox {
                                 true => self._sent_sms.push(sms.clone()),
