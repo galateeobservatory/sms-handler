@@ -10,3 +10,4 @@ edition = "2018"
 reqwest = {version = "*", features = ["blocking", "cookies"]}
 error-chain = "*"
 regex = "*"
+quick-xml = "*"
