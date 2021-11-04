@@ -26,14 +26,34 @@ impl E3372 {
         return new_e3372;
     }
 
-    pub fn get_sms_count(&self) -> String {
+    pub fn get_sms_count(&self) -> (u32, u32) {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
         const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
         let mut res= self._client.get("http://192.168.8.1/api/sms/sms-count").header(CUSTOM_HEADER, csrf_token).send().unwrap();
         let mut body = String::from("");
         res.read_to_string(&mut body).unwrap();
-        return body;
+        return self.extract_sms_count_from_xml(&body);
     }
+
+    fn extract_sms_count_from_xml(&self, xml: &str) -> (u32, u32) {
+        let re = Regex::new(r"<LocalInbox>(\d+)</LocalInbox>").unwrap();
+        let re2 = Regex::new(r"<LocalOutbox>(\d+)</LocalOutbox>").unwrap();
+        let cap = re.captures(xml).unwrap();
+        let cap2 = re2.captures(xml).unwrap();
+        return (cap[1].parse::<u32>().unwrap(), cap2[1].parse::<u32>().unwrap());
+    }
+
+    pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) {
+        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+        const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
+        let sms_index_list: Vec<String> = sms_list.iter().map(|sms| sms.index.to_string()).collect();
+        // Post request body: <?xml version="1.0" encoding="UTF-8"?><request><Index>40054</Index><Index>40053</Index></request>
+        let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>{}</Index></request>", sms_index_list.join("</Index><Index>"));
+        let mut res = self._client.post("http://192.168.8.1/api/sms/delete-sms").header(CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
+    }
+
+
+
 
     pub fn get_sms_list(&mut self, outbox: bool) -> String {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
@@ -73,7 +93,7 @@ impl E3372 {
         reader.trim_text(true);
         let mut txt: String = String::new();
         let mut buf = Vec::new();
-        let mut sms: SMS = SMS { phone: "".to_string(), message: "".to_string(), date: NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0) };
+        let mut sms: SMS = SMS { phone: "".to_string(), message: "".to_string(), date: NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0), index: 0 };
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::End(ref e)) => {
@@ -88,6 +108,10 @@ impl E3372 {
                         },
                         b"Date" => {
                             sms.date = NaiveDateTime::parse_from_str(&txt, "%Y-%m-%d %H:%M:%S").unwrap();
+                            txt.clear();
+                        }
+                        b"Index" => {
+                            sms.index = txt.clone().parse::<usize>().unwrap();
                             txt.clear();
                         }
                         b"Message" =>
@@ -113,7 +137,8 @@ impl E3372 {
 pub struct SMS {
     pub(crate) phone: String,
     pub(crate) message: String,
-    pub(crate) date: NaiveDateTime
+    pub(crate) date: NaiveDateTime,
+    index: usize
 }
 
 impl Clone for SMS {
@@ -121,7 +146,8 @@ impl Clone for SMS {
         Self {
             phone: self.phone.clone(),
             message: self.message.clone(),
-            date: self.date.clone()
+            date: self.date.clone(),
+            index: self.index
         }
     }
 
@@ -129,5 +155,6 @@ impl Clone for SMS {
         self.phone = source.phone.clone();
         self.message = source.message.clone();
         self.date = source.date.clone();
+        self.index = source.index;
     }
 }
