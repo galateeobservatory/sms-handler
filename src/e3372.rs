@@ -8,8 +8,8 @@ pub struct E3372 {
     _base_url: String,
     _client: reqwest::blocking::Client,
     _sms_count_in_out: (u32, u32),
-    pub _sent_sms: Vec<SMS>,
-    pub _received_sms: Vec<SMS>
+    pub sent_sms: Vec<SMS>,
+    pub received_sms: Vec<SMS>
 }
 
 #[allow(dead_code)]
@@ -23,34 +23,32 @@ impl E3372 {
             _base_url: url.clone(),
             _client: builder.build().unwrap(),
             _sms_count_in_out: (0, 0),
-            _sent_sms: vec![],
-            _received_sms: vec![]
+            sent_sms: vec![],
+            received_sms: vec![]
         };
         return new_e3372;
     }
 
-    pub fn fetch_all_data(&mut self) -> bool { // TODO: return Result<bool, String>
-        //Result<(), Error> {
-        //return Err(Error::new(ErrorKind::, "Not implemented yet"));
+    pub fn fetch_all_data(mut self) -> Result<Self, ()> {
         match self.fetch_sms_count() {
             false => {
-                return false;
+                return Err(());
             }
             _ => {}
         }
         match self.fetch_sms_list(false) {
             false => {
-                return false;
+                return Err(());
             }
             _ => {}
         }
         match self.fetch_sms_list(true) {
             false => {
-                return false;
+                return Err(());
             }
             _ => {}
         }
-        return true;
+        return Ok(self);
     }
 
     fn fetch_sms_count(&mut self) -> bool {
@@ -78,19 +76,33 @@ impl E3372 {
         return (cap[1].parse::<u32>().unwrap(), cap2[1].parse::<u32>().unwrap());
     }
 
-    pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) -> bool {
+    pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) -> Result<(), ()> {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
         let sms_index_list: Vec<String> = sms_list.iter().map(|sms| sms.index.to_string()).collect();
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>{}</Index></request>", sms_index_list.join("</Index><Index>"));
         let res = self._client.post(format!("{}/api/sms/delete-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
-        return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
+        match res.status().is_success() && res.text().unwrap().contains("<response>OK</response>") {
+            true => {
+                return Ok(());
+            }
+            false => {
+                return Err(());
+            }
+        }
     }
 
-    pub fn send_sms(&self, phone: &str, content: &str) -> bool {
+    pub fn send_sms(&self, phone: &str, content: &str) -> Result<(), ()> {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>-1</Index><Phones><Phone>{}</Phone></Phones><Sca></Sca><Content>{}</Content><Length>{}</Length><Reserved>1</Reserved><Date>{}</Date></request>", phone, content, content.len(), Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
         let res = self._client.post(format!("{}/api/sms/send-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
-        return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
+        match res.status().is_success() && res.text().unwrap().contains("<response>OK</response>") {
+            true => {
+                return Ok(());
+            }
+            false => {
+                return Err(());
+            }
+        }
     }
 
     // boxtype = 1 -> recv
@@ -165,8 +177,8 @@ impl E3372 {
                         }
                         b"Message" =>
                             match outbox {
-                                true => self._sent_sms.push(sms.clone()),
-                                false => self._received_sms.push(sms.clone())
+                                true => self.sent_sms.push(sms.clone()),
+                                false => self.received_sms.push(sms.clone())
                             },
                         _ => ()
                     }

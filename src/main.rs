@@ -10,8 +10,7 @@ fn main() {
     }
     let command_line_option = &args[1];
 
-    let mut e33 = e3372::E3372::new("http://192.168.8.1".parse().unwrap());
-    e33.fetch_all_data();
+    let e33 = e3372::E3372::new("http://192.168.8.1".parse().unwrap()).fetch_all_data().unwrap();
     match &command_line_option[..] {
         "--list" | "--send" => {
             if args.len() < 3 {
@@ -24,14 +23,14 @@ fn main() {
                 "--list" => {
                     match &command_line_option2[..] {
                         "sent" => {
-                            e33._sent_sms.iter().for_each(|sms| {
+                            e33.sent_sms.iter().for_each(|sms| {
                                 println!("Phone: {}", sms.phone);
                                 println!("Message: {}", sms.message);
                                 println!("Date: {}", sms.date);
                             });
                         },
                         "received" => {
-                            e33._received_sms.iter().for_each(|sms| {
+                            e33.received_sms.iter().for_each(|sms| {
                                 println!("Phone: {}", sms.phone);
                                 println!("Message: {}", sms.message);
                                 println!("Date: {}", sms.date);
@@ -48,7 +47,7 @@ fn main() {
                         print_usage(&args);
                         return;
                     }
-                    if !e33.send_sms(&*args[2], &*args[3]) {
+                    if e33.send_sms(&*args[2], &*args[3]).is_err() {
                         eprintln!("Error sending sms");
                     }
                     println!("SMS sent");
@@ -59,7 +58,7 @@ fn main() {
             }
         }
         "--clean" => {
-            if !e33.delete_sms_list(&e33._sent_sms) || !e33.delete_sms_list(&e33._received_sms) {
+            if e33.delete_sms_list(&e33.sent_sms).is_err() || e33.delete_sms_list(&e33.received_sms).is_err() {
                 eprintln!("Failed to delete SMSs");
                 return;
             }
