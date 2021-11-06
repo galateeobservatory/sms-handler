@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::io::Read;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -30,12 +29,31 @@ impl E3372 {
         return new_e3372;
     }
 
-    pub fn extract_datas() -> bool { //Result<(), Error> {
+    pub fn fetch_all_data(&mut self) -> bool { // TODO: return Result<bool, String>
+        //Result<(), Error> {
         //return Err(Error::new(ErrorKind::, "Not implemented yet"));
+        match self.fetch_sms_count() {
+            false => {
+                return false;
+            }
+            _ => {}
+        }
+        match self.fetch_sms_list(false) {
+            false => {
+                return false;
+            }
+            _ => {}
+        }
+        match self.fetch_sms_list(true) {
+            false => {
+                return false;
+            }
+            _ => {}
+        }
         return true;
     }
 
-    pub fn get_sms_count(&mut self) -> bool {
+    fn fetch_sms_count(&mut self) -> bool {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
         let mut res = self._client.get(format!("{}/api/sms/sms-count", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).send().unwrap();
         if res.status() != reqwest::StatusCode::OK {
@@ -77,7 +95,7 @@ impl E3372 {
 
     // boxtype = 1 -> recv
     // boxtype = 2 -> sent
-    pub fn get_sms_list(&mut self, outbox: bool) -> bool {
+    fn fetch_sms_list(&mut self, outbox: bool) -> bool {
         let mut total_sms_count: i32 = if outbox { self._sms_count_in_out.1 } else { self._sms_count_in_out.0 } as i32;
         let mut page_index = 1;
         let box_type = if outbox { 2 } else { 1 };
@@ -154,11 +172,10 @@ impl E3372 {
                     }
                 },
                 Ok(Event::Text(e)) => txt = e.unescape_and_decode(&reader).unwrap(),
-                Ok(Event::Eof) => break, // exits the loop when reaching end of file
+                Ok(Event::Eof) => break,
                 Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
-                _ => (), // There are several other `Event`s we do not consider here
+                _ => (),
             }
-            // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
             buf.clear();
         }
     }
