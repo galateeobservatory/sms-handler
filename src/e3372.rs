@@ -1,20 +1,19 @@
+use std::error::Error;
 use std::io::Read;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use regex::Regex;
 use chrono::{Local, NaiveDate, NaiveDateTime};
-use reqwest::header::REFERER;
 
 pub struct E3372 {
     _base_url: String,
     _client: reqwest::blocking::Client,
+    _sms_count_in_out: (u32, u32),
     pub _sent_sms: Vec<SMS>,
     pub _received_sms: Vec<SMS>
 }
 
-// <?xml version="1.0" encoding="UTF-8"?><request><Index>-1</Index><Phones><Phone>0783340212</Phone><Phone>0783340212</Phone></Phones><Sca></Sca><Content>hello world</Content><Length>11</Length><Reserved>1</Reserved><Date>2021-11-06 10:40:21</Date></request>
-
-
+#[allow(dead_code)]
 impl E3372 {
     const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
 
@@ -24,19 +23,33 @@ impl E3372 {
         let new_e3372 = E3372 {
             _base_url: url.clone(),
             _client: builder.build().unwrap(),
+            _sms_count_in_out: (0, 0),
             _sent_sms: vec![],
             _received_sms: vec![]
         };
         return new_e3372;
     }
 
-    pub fn get_sms_count(&self) -> (u32, u32) {
+    pub fn extract_datas() -> bool { //Result<(), Error> {
+        //return Err(Error::new(ErrorKind::, "Not implemented yet"));
+        return true;
+    }
+
+    pub fn get_sms_count(&mut self) -> bool {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
-        const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
-        let mut res= self._client.get("http://192.168.8.1/api/sms/sms-count").header(CUSTOM_HEADER, csrf_token).send().unwrap();
+        let mut res = self._client.get(format!("{}/api/sms/sms-count", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).send().unwrap();
+        if res.status() != reqwest::StatusCode::OK {
+            println!("Error: {}", res.status());
+            return false;
+        }
         let mut body = String::from("");
         res.read_to_string(&mut body).unwrap();
-        return self.extract_sms_count_from_xml(&body);
+        if body.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<error>") {
+            println!("Error: {}", body);
+            return false;
+        }
+        self._sms_count_in_out = self.extract_sms_count_from_xml(&body);
+        return true;
     }
 
     fn extract_sms_count_from_xml(&self, xml: &str) -> (u32, u32) {
@@ -49,36 +62,44 @@ impl E3372 {
 
     pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) -> bool {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
-        const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
         let sms_index_list: Vec<String> = sms_list.iter().map(|sms| sms.index.to_string()).collect();
-        // Post request body: <?xml version="1.0" encoding="UTF-8"?><request><Index>40054</Index><Index>40053</Index></request>
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>{}</Index></request>", sms_index_list.join("</Index><Index>"));
-        let mut res = self._client.post("http://192.168.8.1/api/sms/delete-sms").header(CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
+        let res = self._client.post(format!("{}/api/sms/delete-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
         return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
     }
 
     pub fn send_sms(&self, phone: &str, content: &str) -> bool {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
-        const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>-1</Index><Phones><Phone>{}</Phone></Phones><Sca></Sca><Content>{}</Content><Length>{}</Length><Reserved>1</Reserved><Date>{}</Date></request>", phone, content, content.len(), Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
-        let mut res = self._client.post("http://192.168.8.1/api/sms/send-sms").header(CUSTOM_HEADER, csrf_token).header(REFERER, "http://192.168.8.1/html/smsinbox.html").body(xml_body).send().unwrap();
+        let res = self._client.post(format!("{}/api/sms/send-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
         return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
     }
 
-    pub fn get_sms_list(&mut self, outbox: bool) -> String {
-        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
-        // boxtype = 1 -> recv
-        // boxtype = 2 -> sent
-        let mut res = self._client.post("http://192.168.8.1/api/sms/sms-list").header(E3372::CUSTOM_HEADER, csrf_token.clone()).body(format!("{}{}{}", r#"<?xml version: "1.0" encoding="UTF-8"?><request><PageIndex>1</PageIndex><ReadCount>20</ReadCount><BoxType>"#,
-                                                                                                                                             if outbox {"2"}else{"1"}, r#"</BoxType><SortType>0</SortType><Ascending>0</Ascending><UnreadPreferred>0</UnreadPreferred></request>"#)).send().unwrap();
-        let mut body = String::from("");
-        res.read_to_string(&mut body).unwrap();
-        self.fill_sms_list(&body, outbox);
-        return body;
+    // boxtype = 1 -> recv
+    // boxtype = 2 -> sent
+    pub fn get_sms_list(&mut self, outbox: bool) -> bool {
+        let mut total_sms_count: i32 = if outbox { self._sms_count_in_out.1 } else { self._sms_count_in_out.0 } as i32;
+        let mut page_index = 1;
+        let box_type = if outbox { 2 } else { 1 };
+        while total_sms_count > 0 {
+            let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+            let xml_body = format!("<?xml version: \"1.0\" encoding=\"UTF-8\"?><request><PageIndex>{}</PageIndex><ReadCount>50</ReadCount><BoxType>{}</BoxType><SortType>0</SortType><Ascending>0</Ascending><UnreadPreferred>0</UnreadPreferred></request>", page_index, box_type);
+            let mut res = self._client.post(format!("{}/api/sms/sms-list", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token.clone()).body(xml_body).send().unwrap();
+            let mut body = String::from("");
+            res.read_to_string(&mut body).unwrap();
+            self.fill_sms_list(&body, outbox);
+            if body.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<error>") {
+                return false;
+            }
+            total_sms_count -= 50;
+            page_index += 1;
+        }
+
+        return true;
     }
 
     fn request_cookie_token(&self) -> String {
-        let mut res = self._client.get("http://192.168.8.1/html/smsinbox.html?smssent").send().unwrap();
+        let mut res = self._client.get(format!("{}/html/smsinbox.html?smssent", self._base_url)).send().unwrap();
         let mut body = String::new();
         res.read_to_string(&mut body).unwrap();
         return body;
@@ -137,18 +158,11 @@ impl E3372 {
                 Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
                 _ => (), // There are several other `Event`s we do not consider here
             }
-
             // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
             buf.clear();
         }
     }
 }
-
-/*impl Drop for E3372 {
-    fn drop(&mut self) {
-        self._client.close();
-    }
-}*/
 
 pub struct SMS {
     pub(crate) phone: String,
