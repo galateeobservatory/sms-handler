@@ -8,16 +8,17 @@ fn main() {
     //println!("{}", e33.get_sms_list(true));
     e33.get_sms_list(true);
     e33.get_sms_list(false);
-    /*for sms in e33._sent_sms.iter().chain(e33._receiveid_sms.iter()) {
+    for sms in e33._sent_sms.iter().chain(e33._received_sms.iter()) {
         println!("Phone: {}", sms.phone);
         println!("Message: {}", sms.message);
         println!("Date: {}", sms.date);
-    }*/
-    e33._sent_sms[0..3].to_vec().iter().for_each(|sms| {
+    }
+    /*e33._sent_sms[0..3].to_vec().iter().for_each(|sms| {
         println!("Phone: {}", sms.phone);
         println!("Message: {}", sms.message);
         println!("Date: {}", sms.date);
-    });
+    });*/
 
-    e33.delete_sms_list(&e33._sent_sms[0..3].to_vec());
+    //println!("{}", e33.delete_sms_list(&e33._sent_sms[0..1].to_vec()));
+    println!("{}", e33.send_sms("**********", "Hello from Rust !!"));
 }

@@ -2,14 +2,18 @@ use std::io::Read;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use regex::Regex;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Local, NaiveDate, NaiveDateTime};
+use reqwest::header::REFERER;
 
 pub struct E3372 {
     _base_url: String,
     _client: reqwest::blocking::Client,
     pub _sent_sms: Vec<SMS>,
-    pub _receiveid_sms: Vec<SMS>
+    pub _received_sms: Vec<SMS>
 }
+
+// <?xml version="1.0" encoding="UTF-8"?><request><Index>-1</Index><Phones><Phone>0783340212</Phone><Phone>0783340212</Phone></Phones><Sca></Sca><Content>hello world</Content><Length>11</Length><Reserved>1</Reserved><Date>2021-11-06 10:40:21</Date></request>
+
 
 impl E3372 {
     const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
@@ -21,7 +25,7 @@ impl E3372 {
             _base_url: url.clone(),
             _client: builder.build().unwrap(),
             _sent_sms: vec![],
-            _receiveid_sms: vec![]
+            _received_sms: vec![]
         };
         return new_e3372;
     }
@@ -43,17 +47,23 @@ impl E3372 {
         return (cap[1].parse::<u32>().unwrap(), cap2[1].parse::<u32>().unwrap());
     }
 
-    pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) {
+    pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) -> bool {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
         const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
         let sms_index_list: Vec<String> = sms_list.iter().map(|sms| sms.index.to_string()).collect();
         // Post request body: <?xml version="1.0" encoding="UTF-8"?><request><Index>40054</Index><Index>40053</Index></request>
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>{}</Index></request>", sms_index_list.join("</Index><Index>"));
         let mut res = self._client.post("http://192.168.8.1/api/sms/delete-sms").header(CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
+        return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
     }
 
-
-
+    pub fn send_sms(&self, phone: &str, content: &str) -> bool {
+        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+        const CUSTOM_HEADER: &'static str = "__RequestVerificationToken";
+        let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>-1</Index><Phones><Phone>{}</Phone></Phones><Sca></Sca><Content>{}</Content><Length>{}</Length><Reserved>1</Reserved><Date>{}</Date></request>", phone, content, content.len(), Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+        let mut res = self._client.post("http://192.168.8.1/api/sms/send-sms").header(CUSTOM_HEADER, csrf_token).header(REFERER, "http://192.168.8.1/html/smsinbox.html").body(xml_body).send().unwrap();
+        return res.status().is_success() && res.text().unwrap().contains("<response>OK</response>");
+    }
 
     pub fn get_sms_list(&mut self, outbox: bool) -> String {
         let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
@@ -117,7 +127,7 @@ impl E3372 {
                         b"Message" =>
                             match outbox {
                                 true => self._sent_sms.push(sms.clone()),
-                                false => self._receiveid_sms.push(sms.clone())
+                                false => self._received_sms.push(sms.clone())
                             },
                         _ => ()
                     }
@@ -133,6 +143,12 @@ impl E3372 {
         }
     }
 }
+
+/*impl Drop for E3372 {
+    fn drop(&mut self) {
+        self._client.close();
+    }
+}*/
 
 pub struct SMS {
     pub(crate) phone: String,
