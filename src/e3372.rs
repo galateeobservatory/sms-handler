@@ -30,42 +30,30 @@ impl E3372 {
     }
 
     pub fn fetch_all_data(mut self) -> Result<Self, ()> {
-        match self.fetch_sms_count() {
-            false => {
-                return Err(());
-            }
-            _ => {}
+        if self.fetch_sms_count().is_err() {
+            return Err(());
         }
-        match self.fetch_sms_list(false) {
-            false => {
-                return Err(());
-            }
-            _ => {}
-        }
-        match self.fetch_sms_list(true) {
-            false => {
-                return Err(());
-            }
-            _ => {}
+        if self.fetch_sms_list(false).is_err() || self.fetch_sms_list(true).is_err() {
+            return Err(());
         }
         return Ok(self);
     }
 
-    fn fetch_sms_count(&mut self) -> bool {
-        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+    fn fetch_sms_count(&mut self) -> Result<(), ()> {
+        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token().unwrap()).unwrap();
         let mut res = self._client.get(format!("{}/api/sms/sms-count", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).send().unwrap();
         if res.status() != reqwest::StatusCode::OK {
             println!("Error: {}", res.status());
-            return false;
+            return Err(());
         }
         let mut body = String::from("");
         res.read_to_string(&mut body).unwrap();
         if body.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<error>") {
             println!("Error: {}", body);
-            return false;
+            return Err(());
         }
         self._sms_count_in_out = self.extract_sms_count_from_xml(&body);
-        return true;
+        return Ok(());
     }
 
     fn extract_sms_count_from_xml(&self, xml: &str) -> (u32, u32) {
@@ -77,7 +65,7 @@ impl E3372 {
     }
 
     pub fn delete_sms_list(&self, sms_list: &Vec<SMS>) -> Result<(), ()> {
-        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token().unwrap()).unwrap();
         let sms_index_list: Vec<String> = sms_list.iter().map(|sms| sms.index.to_string()).collect();
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>{}</Index></request>", sms_index_list.join("</Index><Index>"));
         let res = self._client.post(format!("{}/api/sms/delete-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
@@ -92,7 +80,7 @@ impl E3372 {
     }
 
     pub fn send_sms(&self, phone: &str, content: &str) -> Result<(), ()> {
-        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+        let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token().unwrap()).unwrap();
         let xml_body = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>-1</Index><Phones><Phone>{}</Phone></Phones><Sca></Sca><Content>{}</Content><Length>{}</Length><Reserved>1</Reserved><Date>{}</Date></request>", phone, content, content.len(), Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
         let res = self._client.post(format!("{}/api/sms/send-sms", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token).body(xml_body).send().unwrap();
         match res.status().is_success() && res.text().unwrap().contains("<response>OK</response>") {
@@ -107,46 +95,62 @@ impl E3372 {
 
     // boxtype = 1 -> recv
     // boxtype = 2 -> sent
-    fn fetch_sms_list(&mut self, outbox: bool) -> bool {
+    fn fetch_sms_list(&mut self, outbox: bool) -> Result<(), ()> {
         let mut total_sms_count: i32 = if outbox { self._sms_count_in_out.1 } else { self._sms_count_in_out.0 } as i32;
         let mut page_index = 1;
         let box_type = if outbox { 2 } else { 1 };
         while total_sms_count > 0 {
-            let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token());
+            let csrf_token = E3372::extract_csrf_token(&self.request_cookie_token().unwrap()).unwrap();
             let xml_body = format!("<?xml version: \"1.0\" encoding=\"UTF-8\"?><request><PageIndex>{}</PageIndex><ReadCount>50</ReadCount><BoxType>{}</BoxType><SortType>0</SortType><Ascending>0</Ascending><UnreadPreferred>0</UnreadPreferred></request>", page_index, box_type);
             let mut res = self._client.post(format!("{}/api/sms/sms-list", self._base_url)).header(E3372::CUSTOM_HEADER, csrf_token.clone()).body(xml_body).send().unwrap();
             let mut body = String::from("");
-            res.read_to_string(&mut body).unwrap();
+            if res.read_to_string(&mut body).is_err() {
+                return Err(());
+            }
             self.fill_sms_list(&body, outbox);
             if body.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<error>") {
-                return false;
+                return Err(());
             }
             total_sms_count -= 50;
             page_index += 1;
         }
 
-        return true;
+        return Ok(());
     }
 
-    fn request_cookie_token(&self) -> String {
-        let mut res = self._client.get(format!("{}/html/smsinbox.html?smssent", self._base_url)).send().unwrap();
+    fn request_cookie_token(&self) -> Result<String, ()> {
+        let res = self._client.get(format!("{}/html/smsinbox.html?smssent", self._base_url)).send();
+        if res.is_err() {
+            return Err(());
+        }
+        let mut res = res.unwrap();
         let mut body = String::new();
-        res.read_to_string(&mut body).unwrap();
-        return body;
+        if res.read_to_string(&mut body).is_err() {
+            return Err(());
+        }
+        return Ok(body);
     }
 
-    fn extract_csrf_token(body: &str) -> String {
-        let re = Regex::new(r#"<meta name="csrf_token" content="(.*)"/>"#).unwrap();
+    fn extract_csrf_token(body: &str) -> Result<String, ()> {
+        let re = Regex::new(r#"<meta name="csrf_token" content="(.*)"/>"#);
+        if re.is_err() {
+            return Err(());
+        }
+        let re = re.unwrap();
         let mut token: String = String::from("");
         for line in body.lines() {
             if re.is_match(line) {
-                let tokens = re.captures(line).unwrap();
+                let tokens = re.captures(line);
+                if tokens.is_none() {
+                    return Err(());
+                }
+                let tokens = tokens.unwrap();
                 if tokens.len() >= 2 {
                     token = String::from(&tokens[1]);
                 }
             }
         }
-        return String::from(token);
+        return Ok(String::from(token));
     }
 
     fn fill_sms_list(&mut self, xml_resp: &str, outbox: bool) -> () {
@@ -185,7 +189,7 @@ impl E3372 {
                 },
                 Ok(Event::Text(e)) => txt = e.unescape_and_decode(&reader).unwrap(),
                 Ok(Event::Eof) => break,
-                Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
+                Err(e) => panic!("Error decoding XML at position {}: {:?}", reader.buffer_position(), e),
                 _ => (),
             }
             buf.clear();
